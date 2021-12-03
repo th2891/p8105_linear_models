@@ -283,3 +283,132 @@ cv_df %>%
 
 -   wanted lowest rmse
 -   smooth - as expected - has lowest, best predictabilty from rmse
+
+## Child growth data
+
+import data
+
+``` r
+child_growth_df = read_csv("./data/nepalese_children.csv") %>% 
+  mutate(
+    weight_cp = (weight > 7) * (weight - 7)
+  )
+```
+
+    ## Rows: 2705 Columns: 5
+
+    ## ── Column specification ────────────────────────────────────────────────────────
+    ## Delimiter: ","
+    ## dbl (5): age, sex, weight, height, armc
+
+    ## 
+    ## ℹ Use `spec()` to retrieve the full column specification for this data.
+    ## ℹ Specify the column types or set `show_col_types = FALSE` to quiet this message.
+
+should we be fitting linear models or non-linear models in this data
+set?
+
+``` r
+child_growth_df %>% 
+  ggplot(aes(x = weight, y = armc)) +
+  geom_point(alpha = .2)
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-11-1.png" width="90%" />
+
+consider candidate models
+
+-   linear model
+-   piece-wise linear model
+-   smooth model –&gt; go back and add term to data set (“weight\_cp”)
+
+``` r
+linear_mod = lm(armc ~ weight, data = child_growth_df)
+pwl_mod = lm(armc ~ weight + weight_cp, data = child_growth_df)
+smooth_mod = gam(armc ~s(weight), data = child_growth_df)
+```
+
+``` r
+child_growth_df %>% 
+  add_predictions(linear_mod) %>% 
+  ggplot(aes(x = weight, y = armc)) +
+  geom_point(alpha = .2) +
+  geom_line(aes(y = pred), color = "red")
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-13-1.png" width="90%" />
+
+``` r
+child_growth_df %>% 
+  add_predictions(pwl_mod) %>% 
+  ggplot(aes(x = weight, y = armc)) +
+  geom_point(alpha = .2) +
+  geom_line(aes(y = pred), color = "red")
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-13-2.png" width="90%" />
+
+``` r
+child_growth_df %>% 
+  add_predictions(smooth_mod) %>% 
+  ggplot(aes(x = weight, y = armc)) +
+  geom_point(alpha = .2) +
+  geom_line(aes(y = pred), color = "red")
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-13-3.png" width="90%" />
+
+Use CV to compare models
+
+``` r
+cv_df = 
+  crossv_mc(child_growth_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+```
+
+Fit models and extract RMSE
+
+``` r
+cv_df = 
+  cv_df %>% 
+  mutate(
+    linear_mod = map(.x = train, ~lm(armc ~ weight, data = .x)),
+    pwl_mod = map(.x = train, ~lm(armc ~ weight + weight_cp, data = .x)),
+    smooth_mod = map(.x = train, ~gam(armc ~ s(weight), data = .x))
+  ) %>% 
+  mutate(
+    rmse_linear = map2_dbl(.x = linear_mod, .y = test, ~rmse(model = .x, data = .y)),
+      rmse_pwl = map2_dbl(.x = pwl_mod, .y = test, ~rmse(model = .x, data = .y)),
+     rmse_smooth = map2_dbl(.x = smooth_mod, .y = test, ~rmse(model = .x, data = .y))
+  )
+```
+
+Look at RMSE distributions
+
+``` r
+cv_df %>% 
+  select(.id, starts_with("rmse")) %>% 
+  pivot_longer(
+    rmse_linear:rmse_smooth,
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_boxplot()
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-16-1.png" width="90%" />
+
+-   boxplot results
+-   difficult to put the models in order in terms of complexity
+-   linear is pretty clearly doing worse than pw or smooth
+-   smooth: consistently doing better than pwl, a little better in terms
+    of generalizability
+-   which would you choose? –&gt; case to be made that linear is not
+    doing enough - missing important feature of the data –&gt; probably
+    pwl is easier to interpret than smooth –&gt; consider what other
+    terms that you need to put into the model and how will models change
