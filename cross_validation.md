@@ -180,3 +180,106 @@ rmse( wiggly_mod, test_df)
 ```
 
     ## [1] 0.289051
+
+## CV iteratively
+
+use `modelr::crossv_mc`
+
+-   training testing splits 100 times
+-   want to get rmse all the way through (fitting all 3 models)
+-   pulling out rows to show which are included in train (just to see
+    what is happening - not necessary step)
+-   making train and test tibbles
+
+``` r
+cv_df = 
+  crossv_mc(nonlin_df, 100)
+
+cv_df %>% pull(train) %>% .[[1]] %>% as_tibble()
+```
+
+    ## # A tibble: 79 × 3
+    ##       id      x       y
+    ##    <int>  <dbl>   <dbl>
+    ##  1     1 0.266   1.11  
+    ##  2     2 0.372   0.764 
+    ##  3     3 0.573   0.358 
+    ##  4     4 0.908  -3.04  
+    ##  5     6 0.898  -1.99  
+    ##  6     7 0.945  -3.27  
+    ##  7     8 0.661  -0.615 
+    ##  8     9 0.629   0.0878
+    ##  9    10 0.0618  0.392 
+    ## 10    11 0.206   1.63  
+    ## # … with 69 more rows
+
+``` r
+cv_df %>% pull(train) %>% .[[100]] %>% as_tibble()
+```
+
+    ## # A tibble: 79 × 3
+    ##       id      x       y
+    ##    <int>  <dbl>   <dbl>
+    ##  1     1 0.266   1.11  
+    ##  2     2 0.372   0.764 
+    ##  3     3 0.573   0.358 
+    ##  4     4 0.908  -3.04  
+    ##  5     5 0.202   1.33  
+    ##  6     6 0.898  -1.99  
+    ##  7     7 0.945  -3.27  
+    ##  8     8 0.661  -0.615 
+    ##  9     9 0.629   0.0878
+    ## 10    10 0.0618  0.392 
+    ## # … with 69 more rows
+
+``` r
+cv_df = 
+  crossv_mc(nonlin_df, 100) %>% 
+  mutate(
+    train = map(train, as_tibble),
+    test = map(test, as_tibble)
+  )
+```
+
+Let’s fit models
+
+-   finding rmse for multiple 80/20 splits
+-   compare to smooth and wiggly model
+
+``` r
+cv_df = 
+  cv_df %>% 
+  mutate(
+    linear_mod = map(.x = train, ~lm(y ~ x, data = .x)),
+    smooth_mod = map(.x = train, ~gam(y ~ s(x), data = .x)),
+    wiggly_mod = map(.x = train, ~gam(y ~ s(x, k = 30), sp = 10e-6, data = .x))
+  ) %>% 
+  mutate(
+    rmse_linear = map2_dbl(.x = linear_mod, .y = test, ~rmse(model = .x, data = .y)),
+      rmse_smooth = map2_dbl(.x = smooth_mod, .y = test, ~rmse(model = .x, data = .y)),
+      rmse_wiggly = map2_dbl(.x = wiggly_mod, .y = test, ~rmse(model = .x, data = .y))
+  )
+```
+
+look at output
+
+-   tidy df to make plot
+-   make box plot to see rmse differences
+
+``` r
+cv_df %>% 
+  select(.id, starts_with("rmse")) %>% 
+  pivot_longer(
+    rmse_linear:rmse_wiggly,
+    names_to = "model", 
+    values_to = "rmse",
+    names_prefix = "rmse_"
+  ) %>% 
+  ggplot(aes(x = model, y = rmse)) + 
+  geom_boxplot()
+```
+
+<img src="cross_validation_files/figure-gfm/unnamed-chunk-9-1.png" width="90%" />
+
+-   wanted lowest rmse
+-   smooth - as expected - has lowest, best predictabilty from rmse
