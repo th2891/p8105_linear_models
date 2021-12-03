@@ -68,3 +68,21 @@ Coding the bootstrap
 * keeping track of the bootstrap samples, analysis, and results in a single data frame that organizes the process and prevents mistakes 
 
 * use list columns 
+
+
+Bootstrapping vs. cross-validation
+
+* similar
+
+* get lots of data sets, run regression, results
+
+* bootstrapping
+** inference on some model parameter (CI for regression coefficient but don't trust usual statistics machinery, or CI for correlation that is close to 1)
+** can't trust normal thing that you would do
+** inference on some parameter or inference on some model componeent (sometimes p-value)
+** here is the model - how to put CI on this thing, how to do....
+
+* cross validation
+** how well this model works on different data set
+** both looking at one data set and thinking about if extended to whole population
+** prediction accuracy - compare 2 models and see which ones is better (without p-values, hypothisis test)
