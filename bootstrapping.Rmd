@@ -8,7 +8,9 @@ library(tidyverse)
 library(viridis)
 
 library(modelr)
-library(mgcv)
+library(p8105.datasets)
+
+library(patchwork)
 
 knitr::opts_chunk$set(
   echo = TRUE,
@@ -85,4 +87,219 @@ Bootstrapping vs. cross-validation
 * cross validation
 ** how well this model works on different data set
 ** both looking at one data set and thinking about if extended to whole population
-** prediction accuracy - compare 2 models and see which ones is better (without p-values, hypothisis test)
+** prediction accuracy - compare 2 models and see which ones is better (without p-values, hypothesis test)
+
+## simulate dataset
+
+```{r}
+n_samp = 250
+
+sim_df_const = 
+  tibble(
+    x = rnorm(n_samp, 1, 1),
+    error = rnorm(n_samp, 0, 1),
+    y = 2 + 3 * x + error
+  )
+
+sim_df_nonconst = sim_df_const %>% 
+  mutate(
+  error = error * .75 * x,
+  y = 2 + 3 * x + error
+)
+```
+
+make a plot
+
+```{r}
+sim_df_const %>% 
+  ggplot(aes(x = x, y = x)) +
+  geom_point()
+
+sim_df_nonconst %>% 
+  ggplot(aes(x = x, y = x)) +
+  geom_point()
+```
+
+```{r}
+sim_df_const %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy()
+
+sim_df_nonconst %>% 
+  lm(y ~ x, data = .) %>% 
+  broom::tidy()
+```
+
+## Try to use bootstrap for inference 
+
+* Implement procedure to get better se
+
+* draw a sample with replacement and then analyze linear model 
+
+* do repeatedly, then look at actual dist. of intercept and slope under concept of doing repeated sampling 
+
+```{r}
+bootstrap_sample =
+  sim_df_nonconst %>% 
+  sample_frac(size = 1, replace = TRUE) %>% 
+  arrange(x)
+
+lm(y ~ x, data = bootstrap_sample)
+```
+
+Write a function
+
+```{r}
+boot_sample = function(df) {
+  
+  sample_frac(df, size = 1, replace = TRUE)
+  
+}
+```
+
+Now - make a tibble to keep track of everything
+
+```{r}
+boot_strap_df = 
+  tibble(
+    strap_number = 1:1000, 
+    strap_sample = rerun(1000, boot_sample(sim_df_nonconst))
+  )
+```
+
+next step kinda the same as repeated regressions, regressions across CV samples...etc. 
+
+```{r}
+bootstrap_results = 
+  boot_strap_df %>% 
+  mutate(
+    models = map(.x = strap_sample, ~lm(y ~ x, data = .x)), 
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results)
+
+bootstrap_results %>% 
+  ggplot(aes(x = estimate)) +
+  geom_histogram() + 
+  facet_grid(~term, scales = "free")
+
+lm(y ~ x, data = sim_df_nonconst) %>% 
+  broom::tidy()
+
+bootstrap_results %>% 
+  group_by(term) %>% 
+  summarize(
+    se = sd(estimate)
+  )
+```
+
+* fitting linear model - what think is the se under the parametric assumptions the normality and constant variance, etc (into least squares) --> se = sd(estimate) --> empirical se, what we think right answer is
+
+  **  more accurate se for slope (right thing to use when making CI's, p-values, etc)
+
+* the distribution from ggplot is what think the intercept would look like under repeated sampling (actual distribution of estimated regression coefficient under repeated sampling)
+** take mean - should be estimate of intercept 
+** take the sd - sd of parameter in model = se of parameter 
+* scales = "free" = scales for x, axis doesn't have to be the same for each histogram
+
+* repeat analysis for constant model -- bootstrap and linear regression just about the same
+
+
+## Use `modelr` (to do the same thing)
+
+```{r}
+sim_df_nonconst %>% 
+  bootstrap(n = 1000, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(y ~ x, data = .x)), 
+    results = map(models, broom::tidy)
+  )
+```
+
+* don't have to write bootstrap function
+
+* save strap number and results
+
+* look at distribution, compute se, etc. 
+
+
+
+## Airbnb datasets
+
+```{r}
+data("nyc_airbnb")
+
+nyc_airbnb = 
+  nyc_airbnb %>% 
+  mutate(stars = review_scores_location/ 2) %>% 
+  rename(
+    borough = neighbourhood_group
+  ) %>% 
+  filter(borough != "Staten Island") %>% 
+  select(price, stars, borough, room_type)
+```
+
+* some part linear association but lots of outliers
+* maybe slope and intercept would be fine but wouldn't be able to say much about distribution (p-value, CI's) 
+* those assumtions aren't met (equal variance)
+* bootstrap to understand association between price and stars given that assumptions aren't met
+
+```{r}
+nyc_airbnb %>% 
+  ggplot(aes(x = stars, y = price)) +
+  geom_point()
+```
+
+
+checking to see that bootstrap is working ok
+```{r}
+airbnb_bootstrap_results = 
+  nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  bootstrap(n = 10, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(price ~ stars, data = .x)), 
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results)
+
+```
+
+* variety of slopes connecting price to star
+
+Since checked -- now do 1000 times....
+
+```{r}
+airbnb_bootstrap_results = 
+  nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  bootstrap(n = 1000, id = "strap_number") %>% 
+  mutate(
+    models = map(.x = strap, ~lm(price ~ stars, data = .x)), 
+    results = map(models, broom::tidy)
+  ) %>% 
+  select(strap_number, results) %>% 
+  unnest(results)
+
+ggplot_star_estimate =
+  airbnb_bootstrap_results %>% 
+  filter(term == "stars") %>% 
+  ggplot(aes(estimate)) +
+  geom_density()
+
+ggplot_scatter = 
+   nyc_airbnb %>% 
+  filter(borough == "Manhattan") %>% 
+  ggplot(aes(x = stars, y = price)) +
+  geom_point()
+
+ggplot_star_estimate + ggplot_scatter
+```
+
+\
+
+
+
+
